@@ -37,3 +37,10 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+*.pdf
+*.xls
+*.xlsx
+*.html
+*.docx
+*.doc
