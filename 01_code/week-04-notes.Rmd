@@ -1,0 +1,205 @@
+---
+title: "week-04-notes"
+author: "Andrew Nalundasan"
+date: "10/10/2021"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# project setup
+
+```{r include=FALSE}
+# Load libraries
+library(tidyverse)
+library(readxl)
+library(dynlm) # use the dynlm package
+library(stats)
+
+```
+
+```{r}
+# read in data
+data <- read_excel("../02_raw_data/HousePrices_CA.xls")
+
+# look at the data
+head(data, 10)
+
+# set lag to stats::lag since it is overridden by dplyr::lag
+lag <- stats::lag
+```
+
+# Model I AR(3)
+
++ Model I for fitting dynamic AR linear models
++ split the sample data into 2 parts: 
+
+    - Estimation sample
+        - (132 - 20) = 112 obs
+        - obs 1 --> obs 112 will be estimation sample
+        - last period of estimation is Q4 2002
+    - Prediction sample 
+        - last 20 observations used as prediction sample
+        - first period to make a prediction will be Q1 2003
+    
+
++ AR <- "Auto Regressive Models"
+
+    - Get estimation first
+    - Then get forecast
+    - Estimate coefficients to calculate forecasts
+    - All models here will be 1 period of forecasts
+    
++ 2 steps: 
+
+    1) Make estimation
+    2) Calculate forecast
+    
++ All models:
+
+    - will create new information set each instance (fcast1 - fcast5)
+    - data is stored in fcast1, fcast2, fcast3, fcast4, fcast5
+    - declare each forecast to be a TS
+    
+```{r}
+# declare g as (quarterly) TS
+g <- ts(data$'Growth Rate_ HousePrice CA', frequency = 4, start = c(1975, 1))
+```
+
+# Fixed Scheme
+
++ only conduct estimation once
++ starting points and end points are fixed
+
+
+```{r}
+# generate a vector of 20 zero's
+fcast1 <- numeric(20) 
+
+# fit AR(3) - this runs the estimation and gives us the coefficients
+model <- dynlm(g ~ lag(g, -1) + lag(g, -3), start = c(1975, 1), end = c(2002, 4))
+
+# start a for-loop
+# fill in forecasted values at the end of each iteration
+for (i in 1:20){
+  # use coef() to pull out the coefficient
+  # NHK usually runs summary() and grabs the column and cell numbers like a nerd
+  fcast1[i] <- coef(model)[1] + coef(model)[2] * g[111 + i] + coef(model)[3] * g[109 + i]
+} # close the for-loop
+```
+
+# Recursive Scheme
+
++ estimation sample expands with each iteration
++ starting point is fixed, but ending point moves
++ run the case 20 times
++ each time we run the estimation, we will get different coefficients
++ we will use the coefficients to estimate our best forecasts
+
+```{r}
+# generate a vector of 20 zero's
+fcast2 <- numeric(20) 
+
+# loop the model in as did with Fixed Scheme
+
+for (i in 1:20){
+  # fit AR(3), note that "end" depends on i
+  # 2 explanatory variables: lag(-1) and lag(3) 
+  model <- dynlm(g ~ lag(g, -1) + lag(g, 3), start = c(1975, 1), end = c(2002, 3 + i))
+  # fill in forecasted values at the end of each iteration
+  # estimation sample has an expanding window, so the sample in each window outputs different coefficients
+  fcast2[i] <- coef(model)[1] + coef(model)[2] * g[111 + i] + coef(model)[3] * g[109 + i]
+}
+```
+
+
+# Rolling Scheme
+
++ our window to make forecasts is moving ("rolling")
++ window of estimation is rolling
++ start points and end points both move
+
+```{r}
+# generate a vector of 20 zero's
+fcast3 <- numeric(20)
+
+for (i in 1:20){
+  # fit AR(3), note that both "start" and "end" depend on i
+  model <- dynlm(g ~ lag(g, -1) + lag(g, -3), start = c(1975, 1 + i), end = c(2002, 3 + i))
+  # fill in forecasted values at the end of each iteration
+  fcast3[i] <- coef(model)[1] + coef(model)[2] * g[111 + i] + coef(model)[3] * g[109 + i]
+}
+```
+
+
+# Model II (Naive)
+
+    - Don't need estimation. Just make direct forecasts
+    - Best price of next period is the price of this period
+
+```{r}
+# generate a vector of 20 zero's
+fcast4 <- numeric(20) 
+
+# naive forecast
+for (i in 1:20){
+  fcast4[i] <- g[111 + i] 
+}
+```
+
+
+# Model III (Average-4)
+
++ Don't need estimation. Just make direct forecasts
++ My best forecast of this period is the average of the last 4 prices
+
+```{r}
+# generate a vector of 20 zero's
+fcast5 <- numeric(20)
+
+for (i in 1:20){
+  # forecast is the average of the last 4 observations
+  fcast5[i] <- (g[111 + i] + g[110 + i] + g[109 + i] + g[108 + i]) / 4
+}
+```
+
+
+# Graph the forecasts we have calculated
+
++ Which model fits the data best?
+
+    - I can't tell. Is it the Naive model?
+    - Naive model has a similar spike to g0
+    - 4-average seems like the worst fit
+    - Fixed/Rolling/Recursive are all quite similar
+
+```{r}
+g0 <- window(g, start = c(2003, 1))
+
+# format fcast variables into a TS
+f1 <- ts(fcast1, frequency = 4, start = c(2003, 1))
+f2 <- ts(fcast2, frequency = 4, start = c(2003, 1))
+f3 <- ts(fcast3, frequency = 4, start = c(2003, 1))
+f4 <- ts(fcast4, frequency = 4, start = c(2003, 1))
+f5 <- ts(fcast5, frequency = 4, start = c(2003, 1))
+
+# plot the data
+
+plot(g0, col='black', main = "CA house price", ylab = "Growth rate", xlab = "Quarter")
+lines(f1, col = 'red')
+lines(f2, col = 'green')
+lines(f3, col = 'brown')
+lines(f4, col = 'purple')
+lines(f5, col = 'blue')
+```
+
+
+
+
